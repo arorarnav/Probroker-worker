@@ -19,6 +19,7 @@ import os
 import io
 import zipfile
 import tempfile
+from datetime import date, timedelta
 from supabase import create_client
 
 from pipeline.parser import parse_and_group, chunk_for_extraction
@@ -33,6 +34,12 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
 UPLOADS_BUCKET = "chat-uploads"
 OUTPUT_BUCKET = "reports-output"
+
+# Matches the product promise: only listings from the last 3 months.
+# Without this, the worker processes a customer's ENTIRE chat history,
+# which is both slower and inconsistent with what the landing page and
+# pricing are built around.
+LISTING_WINDOW_MONTHS = 3
 
 
 def get_chat_text(supabase, user_id: str, report_id: str) -> str:
@@ -66,8 +73,9 @@ def process_report(supabase, report: dict):
 
     raw_text = get_chat_text(supabase, user_id, report_id)
 
-    grouped = parse_and_group(raw_text)
-    print(f"  parsed {len(grouped)} message groups")
+    since = date.today() - timedelta(days=LISTING_WINDOW_MONTHS * 30)
+    grouped = parse_and_group(raw_text, since=since)
+    print(f"  parsed {len(grouped)} message groups (last {LISTING_WINDOW_MONTHS} months only)")
 
     chunks = chunk_for_extraction(grouped)
     rows = extract_all(chunks)
