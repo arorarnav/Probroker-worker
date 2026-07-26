@@ -20,7 +20,7 @@ from openai import OpenAI
 
 # Change this (or set OPENROUTER_MODEL as an env var / GitHub secret) to
 # swap models without touching any other code.
-DEFAULT_MODEL = "openai/gpt-oss-120b:free"
+DEFAULT_MODEL = "google/gemma-4-31b-it:free"
 
 SYSTEM_PROMPT = """You extract real-estate listings from noisy, informal WhatsApp \
 messages (mixed Hindi/Hinglish/English). For each distinct listing you find, output \
