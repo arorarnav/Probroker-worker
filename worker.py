@@ -24,7 +24,7 @@ from supabase import create_client
 
 from pipeline.parser import parse_and_group, chunk_for_extraction
 from pipeline.extract import extract_all
-from pipeline.match import find_matches
+from pipeline.match import find_matches, fill_missing_demand_contact
 from pipeline.report import build_report
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
@@ -79,6 +79,8 @@ def process_report(supabase, report: dict):
     chunks = chunk_for_extraction(grouped)
     rows = extract_all(chunks)
     print(f"  extracted {len(rows)} listings")
+
+    rows = fill_missing_demand_contact(rows)
 
     # Safety check: if extraction produced nothing at all, something is
     # genuinely wrong (model unavailable, API key issue, etc.) -- treat

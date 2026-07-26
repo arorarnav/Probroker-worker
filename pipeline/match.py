@@ -18,6 +18,30 @@ SIZE_UNIT_HINTS = ["bigha", "acre", "sq ft", "sqft", "sq yd", "sqyd", "biswa"]
 
 NULL_LOCATION_MARKERS = {"unspecified", "n/a", "na", "none", "not mentioned", "unknown", ""}
 
+# Matches a poster field that's actually a phone number (WhatsApp shows the
+# raw number when the sender isn't saved as a contact) rather than a name.
+# Accepts optional +91/91 prefix, spaces, dashes -- requires 10+ digits.
+_PHONE_LIKE = re.compile(r'^[\+]?[\d][\d\s\-]{8,14}\d$')
+
+
+def fill_missing_demand_contact(rows: list[dict]) -> list[dict]:
+    """
+    If a demand listing has no contact number but the sender's own name
+    field is actually their raw phone number (not a saved contact name),
+    use that as the contact -- since posting a "wanted" message with no
+    number usually means "call me, I'm right here in the group."
+
+    Does NOT fill in the poster's actual name as a fake contact -- a name
+    isn't a callback number, and displaying one as if it were would be
+    misleading rather than helpful.
+    """
+    for r in rows:
+        if r.get("listing_type") == "demand" and not r.get("contact"):
+            poster = (r.get("poster") or "").strip()
+            if _PHONE_LIKE.match(poster):
+                r["contact"] = poster
+    return rows
+
 
 def _location_similarity(a: str, b: str) -> float:
     if not a or not b:
