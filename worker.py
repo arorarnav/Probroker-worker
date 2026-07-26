@@ -26,6 +26,7 @@ from pipeline.parser import parse_and_group, chunk_for_extraction
 from pipeline.extract import extract_all
 from pipeline.match import find_matches, fill_missing_demand_contact
 from pipeline.report import build_report
+from pipeline.cost_control import cap_chunks_to_budget, get_cost_cap_usd
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
@@ -77,6 +78,17 @@ def process_report(supabase, report: dict):
     print(f"  parsed {len(grouped)} message groups (last {months_back} months only)")
 
     chunks = chunk_for_extraction(grouped)
+    print(f"  {len(chunks)} chunks before cost cap")
+
+    cost_cap_usd = get_cost_cap_usd(months_back)
+    chunks, was_truncated, estimated_cost = cap_chunks_to_budget(chunks, cost_cap_usd)
+    if was_truncated:
+        print(f"  [budget cap] full window would exceed ${cost_cap_usd:.2f} (tier: {months_back}mo) -- "
+              f"kept the {len(chunks)} most recent chunks instead (est. ${estimated_cost:.2f})")
+    else:
+        print(f"  within budget (${cost_cap_usd:.2f} cap for {months_back}mo tier) -- "
+              f"processing all {len(chunks)} chunks (est. ${estimated_cost:.2f})")
+
     rows = extract_all(chunks)
     print(f"  extracted {len(rows)} listings")
 
@@ -110,6 +122,7 @@ def process_report(supabase, report: dict):
     supabase.table("reports").update({
         "status": "completed",
         "report_path": output_path_in_bucket,
+        "truncated_for_budget": was_truncated,
     }).eq("id", report_id).execute()
 
     print(f"  done -> {output_path_in_bucket}")
