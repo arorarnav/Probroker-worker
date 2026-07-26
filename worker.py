@@ -35,11 +35,9 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 UPLOADS_BUCKET = "chat-uploads"
 OUTPUT_BUCKET = "reports-output"
 
-# Matches the product promise: only listings from the last 3 months.
-# Without this, the worker processes a customer's ENTIRE chat history,
-# which is both slower and inconsistent with what the landing page and
-# pricing are built around.
-LISTING_WINDOW_MONTHS = 3
+# Default if a report somehow has no months_back set (shouldn't normally
+# happen, since the dashboard always sends one on upload).
+DEFAULT_LISTING_WINDOW_MONTHS = 3
 
 
 def get_chat_text(supabase, user_id: str, report_id: str) -> str:
@@ -73,9 +71,10 @@ def process_report(supabase, report: dict):
 
     raw_text = get_chat_text(supabase, user_id, report_id)
 
-    since = date.today() - timedelta(days=LISTING_WINDOW_MONTHS * 30)
+    months_back = report.get("months_back") or DEFAULT_LISTING_WINDOW_MONTHS
+    since = date.today() - timedelta(days=months_back * 30)
     grouped = parse_and_group(raw_text, since=since)
-    print(f"  parsed {len(grouped)} message groups (last {LISTING_WINDOW_MONTHS} months only)")
+    print(f"  parsed {len(grouped)} message groups (last {months_back} months only)")
 
     chunks = chunk_for_extraction(grouped)
     rows = extract_all(chunks)
