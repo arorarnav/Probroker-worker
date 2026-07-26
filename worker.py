@@ -73,6 +73,17 @@ def process_report(supabase, report: dict):
     rows = extract_all(chunks)
     print(f"  extracted {len(rows)} listings")
 
+    # Safety check: if extraction produced nothing at all, something is
+    # genuinely wrong (model unavailable, API key issue, etc.) -- treat
+    # this as a failure rather than silently delivering an empty report
+    # to a paying customer.
+    if len(rows) == 0:
+        raise RuntimeError(
+            f"Extraction produced 0 listings from {len(chunks)} chunks -- "
+            "likely a model/API problem, not a real empty chat. Failing "
+            "this report rather than delivering an empty file."
+        )
+
     matches = find_matches(rows)
     print(f"  found {len(matches)} matches")
 
