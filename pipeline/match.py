@@ -95,7 +95,7 @@ def _recency_score(d: str) -> float:
     return max(0.0, 1.0 - age_days / 90)
 
 
-def find_matches(rows: list[dict], location_threshold: float = 0.35, top_n: int = 200) -> list[dict]:
+def find_matches(rows: list[dict], location_threshold: float = 0.5, top_n: int = 200) -> list[dict]:
     """
     Compares every demand row against every supply row and returns ranked
     matches above a minimum location-similarity bar.
