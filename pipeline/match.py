@@ -26,17 +26,22 @@ _PHONE_LIKE = re.compile(r'^[\+]?[\d][\d\s\-]{8,14}\d$')
 
 def fill_missing_demand_contact(rows: list[dict]) -> list[dict]:
     """
-    If a demand listing has no contact number but the sender's own name
-    field is actually their raw phone number (not a saved contact name),
-    use that as the contact -- since posting a "wanted" message with no
-    number usually means "call me, I'm right here in the group."
+    If a listing (demand OR supply) has no contact number but the sender's
+    own name field is actually their raw phone number (not a saved contact
+    name), use that as the contact -- since posting with no number in the
+    message usually means "call me, I'm right here in the group." This
+    applies regardless of listing_type: a supply post from an unsaved
+    number is just as reachable via that number as a demand post is.
 
     Does NOT fill in the poster's actual name as a fake contact -- a name
     isn't a callback number, and displaying one as if it were would be
-    misleading rather than helpful.
+    misleading rather than helpful. If the poster is a business/broker
+    name with genuinely no number anywhere in the message, there's nothing
+    left to extract -- that's a real gap in the source data, not something
+    we can recover.
     """
     for r in rows:
-        if r.get("listing_type") == "demand" and not r.get("contact"):
+        if not r.get("contact"):
             poster = (r.get("poster") or "").strip()
             if _PHONE_LIKE.match(poster):
                 r["contact"] = poster
