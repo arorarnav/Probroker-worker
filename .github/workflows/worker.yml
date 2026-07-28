@@ -1,9 +1,21 @@
 name: Process Reports
 
 on:
-  schedule:
-    - cron: "*/10 * * * *"   # every 10 minutes
-  workflow_dispatch:          # lets you trigger it manually from GitHub's UI too
+  # Schedule is PAUSED during the manual/concierge launch phase -- you're
+  # processing reports by hand right now, and having this fire every 10
+  # minutes would race against you (and fail them, since the model isn't
+  # switched over yet). Uncomment the schedule below once you're ready to
+  # switch back to full automation (e.g. once you cross ~100 users).
+  #
+  # schedule:
+  #   - cron: "*/10 * * * *"
+  workflow_dispatch:          # still lets you trigger it manually to test, any time
+
+# Prevents a second run from starting while an earlier one is still working
+# through reports.
+concurrency:
+  group: process-reports
+  cancel-in-progress: false
 
 jobs:
   process:
@@ -22,5 +34,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python worker.py
