@@ -10,16 +10,20 @@ you've built it (using load_and_run.py, same as always).
 SETUP (once):
     Copy admin.env.example to admin.env, fill in your real Supabase URL
     and service_role key (same two values as your GitHub secrets).
+    Also run supabase_short_id.sql once, in Supabase's SQL Editor, if
+    you haven't already -- it adds the simple numbered IDs this tool uses.
 
 USAGE:
     python admin_tools.py list
-        Shows every report that's paid and waiting for you to process.
+        Shows every report that's paid and waiting for you to process,
+        each with a simple number (#1, #2, ...) -- use that number below,
+        not the long UUID.
 
-    python admin_tools.py download <report_id>
+    python admin_tools.py download <short_id>
         Downloads that customer's raw chat export to your computer, so
         you can run it through your usual Claude.ai extraction process.
 
-    python admin_tools.py finish <report_id> <path_to_report.xlsx>
+    python admin_tools.py finish <short_id> <path_to_report.xlsx>
         Uploads your finished report and marks it "completed" -- the
         customer will see a real Download button on their dashboard
         within seconds, no automation involved.
@@ -49,27 +53,45 @@ def get_client():
     return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
 
 
+def resolve_report(supabase, identifier):
+    """
+    Accepts either the simple short number shown by `list` (e.g. "12") or,
+    for backward compatibility, the full UUID -- and returns the actual
+    row either way. Internally, everything still uses the real UUID for
+    storage paths etc; the short number is purely a convenience for you
+    to type without risking a copy-paste mistake.
+    """
+    if identifier.isdigit():
+        result = supabase.table("reports").select("*").eq("short_id", int(identifier)).execute()
+    else:
+        result = supabase.table("reports").select("*").eq("id", identifier).execute()
+
+    rows = result.data or []
+    return rows[0] if rows else None
+
+
 def cmd_list(supabase):
-    pending = supabase.table("reports").select("*").eq("status", "processing").execute()
+    pending = supabase.table("reports").select("*").eq("status", "processing").order("short_id").execute()
     reports = pending.data or []
     if not reports:
         print("No reports waiting right now.")
         return
     print(f"{len(reports)} report(s) waiting for you:\n")
     for r in reports:
-        print(f"  id:           {r['id']}")
-        print(f"  filename:     {r.get('filename')}")
-        print(f"  months_back:  {r.get('months_back')} months")
-        print(f"  paid on:      {r.get('created_at')}")
+        print(f"  #{r.get('short_id')}  (use this number below)")
+        print(f"    filename:     {r.get('filename')}")
+        print(f"    months_back:  {r.get('months_back')} months")
+        print(f"    paid on:      {r.get('created_at')}")
         print()
 
 
-def cmd_download(supabase, report_id):
-    row = supabase.table("reports").select("*").eq("id", report_id).single().execute().data
+def cmd_download(supabase, identifier):
+    row = resolve_report(supabase, identifier)
     if not row:
-        print("No report found with that id.")
+        print("No report found with that number.")
         return
 
+    report_id = row["id"]
     folder = f"{row['user_id']}/{report_id}"
     files = supabase.storage.from_(UPLOADS_BUCKET).list(folder)
     if not files:
@@ -78,7 +100,7 @@ def cmd_download(supabase, report_id):
 
     file_name = files[0]["name"]
     raw_bytes = supabase.storage.from_(UPLOADS_BUCKET).download(f"{folder}/{file_name}")
-    local_path = f"downloaded_{report_id}_{file_name}"
+    local_path = f"downloaded_report{row.get('short_id')}_{file_name}"
     with open(local_path, "wb") as f:
         f.write(raw_bytes)
 
@@ -87,12 +109,13 @@ def cmd_download(supabase, report_id):
           f"remember to apply that same window in your extraction.")
 
 
-def cmd_finish(supabase, report_id, report_path_local):
-    row = supabase.table("reports").select("*").eq("id", report_id).single().execute().data
+def cmd_finish(supabase, identifier, report_path_local):
+    row = resolve_report(supabase, identifier)
     if not row:
-        print("No report found with that id.")
+        print("No report found with that number.")
         return
 
+    report_id = row["id"]
     output_path_in_bucket = f"{row['user_id']}/{report_id}/report.xlsx"
     with open(report_path_local, "rb") as f:
         supabase.storage.from_(OUTPUT_BUCKET).upload(
@@ -104,7 +127,7 @@ def cmd_finish(supabase, report_id, report_path_local):
         "report_path": output_path_in_bucket,
     }).eq("id", report_id).execute()
 
-    print("Done! The customer will see a Download button on their dashboard now.")
+    print(f"Done! Report #{row.get('short_id')} -- the customer will see a Download button now.")
 
 
 if __name__ == "__main__":
@@ -121,12 +144,12 @@ if __name__ == "__main__":
         cmd_list(supabase)
     elif command == "download":
         if len(sys.argv) < 3:
-            print("Usage: python admin_tools.py download <report_id>")
+            print("Usage: python admin_tools.py download <short_id>")
             sys.exit(1)
         cmd_download(supabase, sys.argv[2])
     elif command == "finish":
         if len(sys.argv) < 4:
-            print("Usage: python admin_tools.py finish <report_id> <path_to_report.xlsx>")
+            print("Usage: python admin_tools.py finish <short_id> <path_to_report.xlsx>")
             sys.exit(1)
         cmd_finish(supabase, sys.argv[2], sys.argv[3])
     else:
