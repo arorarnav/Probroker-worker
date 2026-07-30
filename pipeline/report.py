@@ -32,8 +32,8 @@ def build_report(rows: list[dict], matches: list[dict], out_path: str,
     # ---------- Sheet 1: Listings ----------
     ws = wb.active
     ws.title = "Listings"
-    headers = ["Date Posted", "Times Posted", "Posted By", "Type", "Location", "Size", "Price",
-               "Contact", "Notes", "Days Since Posted", "Status"]
+    headers = ["Date Posted", "Times Posted", "Posted By", "Type", "Location", "Notes",
+               "Size", "Price", "Contact", "Days Since Posted", "Status"]
     _style_header_row(ws, headers, HEADER_FILL)
 
     ws["M1"] = "Active if age <="
@@ -47,10 +47,10 @@ def build_report(rows: list[dict], matches: list[dict], out_path: str,
         ws.cell(row=i, column=3, value=r.get("poster")).font = FONT_NORMAL
         ws.cell(row=i, column=4, value=r.get("listing_type")).font = FONT_NORMAL
         ws.cell(row=i, column=5, value=r.get("location")).font = FONT_NORMAL
-        ws.cell(row=i, column=6, value=r.get("size")).font = FONT_NORMAL
-        ws.cell(row=i, column=7, value=r.get("price")).font = FONT_NORMAL
-        ws.cell(row=i, column=8, value=r.get("contact")).font = FONT_NORMAL
-        ws.cell(row=i, column=9, value=r.get("notes")).font = FONT_NORMAL
+        ws.cell(row=i, column=6, value=r.get("notes")).font = FONT_NORMAL
+        ws.cell(row=i, column=7, value=r.get("size")).font = FONT_NORMAL
+        ws.cell(row=i, column=8, value=r.get("price")).font = FONT_NORMAL
+        ws.cell(row=i, column=9, value=r.get("contact")).font = FONT_NORMAL
         ws.cell(row=i, column=10, value=f"=TODAY()-DATEVALUE(A{i})").font = FONT_NORMAL
         ws.cell(row=i, column=11, value=(
             f'=IF(J{i}<=$N$1,"Active",IF(J{i}<=$N$2,"Aging","Stale"))'
@@ -59,7 +59,7 @@ def build_report(rows: list[dict], matches: list[dict], out_path: str,
             ws.cell(row=i, column=col).border = BORDER
 
     last_row = len(rows) + 1
-    widths = {1: 12, 2: 12, 3: 22, 4: 10, 5: 34, 6: 20, 7: 20, 8: 18, 9: 34, 10: 10, 11: 10}
+    widths = {1: 12, 2: 12, 3: 22, 4: 10, 5: 34, 6: 34, 7: 20, 8: 20, 9: 18, 10: 10, 11: 10}
     for col, w in widths.items():
         ws.column_dimensions[get_column_letter(col)].width = w
     ws.freeze_panes = "A2"
@@ -71,8 +71,8 @@ def build_report(rows: list[dict], matches: list[dict], out_path: str,
     # ---------- Sheet 2: Matches ----------
     ws2 = wb.create_sheet("Matches")
     match_headers = ["Score", "Match Summary", "Demand Date", "Demand Poster", "Demand Location",
-                      "Demand Size", "Demand Contact", "Supply Date", "Supply Poster",
-                      "Supply Location", "Supply Size", "Supply Contact"]
+                      "Demand Size", "Demand Contact", "Demand Notes", "Supply Date", "Supply Poster",
+                      "Supply Location", "Supply Size", "Supply Contact", "Supply Notes"]
     _style_header_row(ws2, match_headers, MATCH_HEADER_FILL)
 
     for i, m in enumerate(matches, start=2):
@@ -84,24 +84,26 @@ def build_report(rows: list[dict], matches: list[dict], out_path: str,
         ws2.cell(row=i, column=5, value=d.get("location")).font = FONT_NORMAL
         ws2.cell(row=i, column=6, value=d.get("size")).font = FONT_NORMAL
         ws2.cell(row=i, column=7, value=d.get("contact")).font = FONT_NORMAL
-        ws2.cell(row=i, column=8, value=s.get("date")).font = FONT_NORMAL
-        ws2.cell(row=i, column=9, value=s.get("poster")).font = FONT_NORMAL
-        ws2.cell(row=i, column=10, value=s.get("location")).font = FONT_NORMAL
-        ws2.cell(row=i, column=11, value=s.get("size")).font = FONT_NORMAL
-        ws2.cell(row=i, column=12, value=s.get("contact")).font = FONT_NORMAL
-        for col in range(1, 13):
+        ws2.cell(row=i, column=8, value=d.get("notes")).font = FONT_NORMAL
+        ws2.cell(row=i, column=9, value=s.get("date")).font = FONT_NORMAL
+        ws2.cell(row=i, column=10, value=s.get("poster")).font = FONT_NORMAL
+        ws2.cell(row=i, column=11, value=s.get("location")).font = FONT_NORMAL
+        ws2.cell(row=i, column=12, value=s.get("size")).font = FONT_NORMAL
+        ws2.cell(row=i, column=13, value=s.get("contact")).font = FONT_NORMAL
+        ws2.cell(row=i, column=14, value=s.get("notes")).font = FONT_NORMAL
+        for col in range(1, 15):
             ws2.cell(row=i, column=col).border = BORDER
 
-    match_widths = {1: 8, 2: 60, 3: 12, 4: 18, 5: 22, 6: 16, 7: 16, 8: 12, 9: 18, 10: 22, 11: 16, 12: 16}
+    match_widths = {1: 8, 2: 60, 3: 12, 4: 18, 5: 22, 6: 16, 7: 16, 8: 32, 9: 12, 10: 18, 11: 22, 12: 16, 13: 16, 14: 32}
     for col, w in match_widths.items():
         ws2.column_dimensions[get_column_letter(col)].width = w
     ws2.freeze_panes = "A2"
     if matches:
-        ws2.add_table(Table(displayName="Matches", ref=f"A1:L{len(matches)+1}",
+        ws2.add_table(Table(displayName="Matches", ref=f"A1:N{len(matches)+1}",
                              tableStyleInfo=TableStyleInfo(name="TableStyleMedium3", showRowStripes=True)))
     for i in range(2, len(matches) + 2):
         ws2.cell(row=i, column=3).number_format = "yyyy-mm-dd"
-        ws2.cell(row=i, column=8).number_format = "yyyy-mm-dd"
+        ws2.cell(row=i, column=9).number_format = "yyyy-mm-dd"
 
     wb.save(out_path)
     return out_path
