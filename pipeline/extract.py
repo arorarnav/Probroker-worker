@@ -100,13 +100,16 @@ def extract_all(chunks: list[str]) -> list[dict]:
                 rows = extract_chunk(chunk, client)
                 all_rows.extend(rows)
                 break
-            except anthropic.RateLimitError as e:
+            except (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.APITimeoutError) as e:
+                # Rate limits AND transient connection/timeout blips both get
+                # retried -- a brief network hiccup shouldn't be allowed to
+                # fail an otherwise-working report.
                 if attempt < MAX_RETRIES_ON_RATE_LIMIT:
                     wait = REQUEST_DELAY_SECONDS * attempt * 5
-                    print(f"[warn] chunk {i}/{len(chunks)} rate-limited, retrying in {wait:.0f}s (attempt {attempt})...")
+                    print(f"[warn] chunk {i}/{len(chunks)} {type(e).__name__}, retrying in {wait:.0f}s (attempt {attempt})...")
                     time.sleep(wait)
                     continue
-                print(f"[warn] chunk {i}/{len(chunks)} failed permanently (rate limit): {e}")
+                print(f"[warn] chunk {i}/{len(chunks)} failed permanently ({type(e).__name__}): {e}")
                 break
             except Exception as e:
                 print(f"[warn] chunk {i}/{len(chunks)} failed: {e}")
