@@ -1,36 +1,21 @@
 """
-Sends each chunk of grouped WhatsApp messages to a model via OpenRouter and
-gets back structured listing rows.
+Sends each chunk of grouped WhatsApp messages directly to Claude and gets
+back structured listing rows. Calls Anthropic's API directly -- no
+OpenRouter markup on top of the model's own price.
 
-OpenRouter's API is OpenAI-compatible, so this uses the standard `openai`
-Python package, just pointed at OpenRouter's servers instead of OpenAI's.
-
-Requires: pip install openai
-Requires: OPENROUTER_API_KEY environment variable (get one free at
-          openrouter.ai -- no card needed for free-tier models)
-
-The model itself is set by DEFAULT_MODEL below, or via an OPENROUTER_MODEL
-environment variable if you want to swap models without editing code.
-Check openrouter.ai/models for the current free-tier list before picking
-one -- the free lineup rotates over time.
+Requires: pip install anthropic
+Requires: ANTHROPIC_API_KEY environment variable (from console.anthropic.com)
 """
 import os
 import json
 import time
-from openai import OpenAI
+import anthropic
 
-# Change this (or set OPENROUTER_MODEL as an env var / GitHub secret) to
-# swap models without touching any other code.
-DEFAULT_MODEL = "openai/gpt-oss-120b:free"
+DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
-# Free-tier models are rate-limited (commonly ~20 requests/minute). Without
-# a delay, a run with hundreds of chunks blows through that budget in the
-# first few seconds and everything after silently fails -- and because
-# WhatsApp exports are chronological, that tends to wipe out your MOST
-# RECENT listings specifically, not random ones. This delay keeps requests
-# under the limit. If you're on a paid model with no such limit, set this
-# to 0 via the OPENROUTER_REQUEST_DELAY env var.
-REQUEST_DELAY_SECONDS = float(os.environ.get("OPENROUTER_REQUEST_DELAY", "3.5"))
+# A small pause between requests is good practice regardless of provider --
+# keeps you well clear of any rate limit rather than bursting requests.
+REQUEST_DELAY_SECONDS = float(os.environ.get("ANTHROPIC_REQUEST_DELAY", "0.3"))
 MAX_RETRIES_ON_RATE_LIMIT = 3
 
 SYSTEM_PROMPT = """You extract real-estate listings from noisy, informal WhatsApp \
@@ -46,10 +31,11 @@ one JSON object with these exact fields:
 - contact: phone number(s) if given, or null
 - notes: any other relevant detail (facing, road width, frontage, restrictions), or null
 
-IMPORTANT: Translate all text fields (location, notes) into English, even when the \
-original message is in Hindi/Devanagari script or Hinglish. Do not leave any field in \
-Devanagari script -- transliterate place names into standard English spelling and \
-translate descriptive text. Keep numbers, units, and phone numbers as-is.
+IMPORTANT: Translate every text field — location, size, price, and notes — fully \
+into English. Do not leave any Devanagari script anywhere in the output, including \
+in notes. Transliterate place names into standard English spelling and translate \
+all descriptive text completely, even informal Hinglish phrases. Keep numbers, \
+units, and phone numbers as-is.
 
 Rules:
 - One listing per distinct property/requirement mentioned, even if several appear \
@@ -60,11 +46,8 @@ in one message block.
 """
 
 
-def _get_client() -> OpenAI:
-    return OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=os.environ["OPENROUTER_API_KEY"],
-    )
+def _get_client() -> anthropic.Anthropic:
+    return anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env automatically
 
 
 def _clean_json_text(raw: str) -> str:
@@ -77,35 +60,34 @@ def _clean_json_text(raw: str) -> str:
     return raw
 
 
-def extract_chunk(chunk_text: str, client: OpenAI | None = None) -> list[dict]:
+def extract_chunk(chunk_text: str, client: anthropic.Anthropic | None = None) -> list[dict]:
     """Extracts structured listings from one chunk of grouped chat text."""
     client = client or _get_client()
-    model = os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": chunk_text},
-        ],
+    response = client.messages.create(
+        model=DEFAULT_MODEL,
+        max_tokens=4096,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": chunk_text}],
     )
-    raw = response.choices[0].message.content
+    raw = response.content[0].text
 
     try:
         return json.loads(_clean_json_text(raw))
     except json.JSONDecodeError:
         # One retry with an explicit correction nudge -- cheap insurance
-        # against an occasional malformed response, same safety net as before.
-        response = client.chat.completions.create(
-            model=model,
+        # against an occasional malformed response.
+        response = client.messages.create(
+            model=DEFAULT_MODEL,
+            max_tokens=4096,
+            system=SYSTEM_PROMPT,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": chunk_text},
                 {"role": "assistant", "content": raw},
                 {"role": "user", "content": "That wasn't valid JSON. Return ONLY the JSON array, nothing else."},
             ],
         )
-        return json.loads(_clean_json_text(response.choices[0].message.content))
+        return json.loads(_clean_json_text(response.content[0].text))
 
 
 def extract_all(chunks: list[str]) -> list[dict]:
@@ -118,14 +100,16 @@ def extract_all(chunks: list[str]) -> list[dict]:
                 rows = extract_chunk(chunk, client)
                 all_rows.extend(rows)
                 break
-            except Exception as e:
-                is_rate_limit = "429" in str(e) or "rate" in str(e).lower()
-                if is_rate_limit and attempt < MAX_RETRIES_ON_RATE_LIMIT:
-                    wait = REQUEST_DELAY_SECONDS * attempt * 3
+            except anthropic.RateLimitError as e:
+                if attempt < MAX_RETRIES_ON_RATE_LIMIT:
+                    wait = REQUEST_DELAY_SECONDS * attempt * 5
                     print(f"[warn] chunk {i}/{len(chunks)} rate-limited, retrying in {wait:.0f}s (attempt {attempt})...")
                     time.sleep(wait)
                     continue
-                print(f"[warn] chunk {i}/{len(chunks)} failed permanently: {e}")
+                print(f"[warn] chunk {i}/{len(chunks)} failed permanently (rate limit): {e}")
+                break
+            except Exception as e:
+                print(f"[warn] chunk {i}/{len(chunks)} failed: {e}")
                 break
         time.sleep(REQUEST_DELAY_SECONDS)
     return all_rows
