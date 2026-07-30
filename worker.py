@@ -17,6 +17,7 @@ row is the entire delivery mechanism.
 """
 import os
 import io
+import json
 import zipfile
 import tempfile
 from datetime import date, timedelta
@@ -105,6 +106,17 @@ def process_report(supabase, report: dict):
 
     rows = attach_repost_info(rows, repost_clusters)
     rows = fill_missing_demand_contact(rows)
+
+    # Safety checkpoint: the expensive part (real API spend) is already done
+    # at this point. Save the extracted data NOW, before attempting to build
+    # or upload the report -- so if THAT step ever crashes (like the openpyxl
+    # bug that prompted this), the already-paid-for extraction isn't lost and
+    # doesn't need to be re-purchased with another API call to recover.
+    checkpoint_path = f"{user_id}/{report_id}/extracted_data.json"
+    supabase.storage.from_(OUTPUT_BUCKET).upload(
+        checkpoint_path, json.dumps(rows, default=str).encode("utf-8"),
+        file_options={"upsert": "true", "content-type": "application/json"}
+    )
 
     # Safety check: if extraction produced nothing at all, something is
     # genuinely wrong (model unavailable, API key issue, etc.) -- treat

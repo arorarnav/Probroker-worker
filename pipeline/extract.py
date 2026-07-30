@@ -79,6 +79,25 @@ def _real_cost(response) -> float:
     return cost
 
 
+def _sanitize_rows(rows: list[dict]) -> list[dict]:
+    """
+    Defensive cleanup: the model is instructed to return a simple string
+    (or null) for every field, but occasionally returns a list instead --
+    e.g. two phone numbers for one listing, as ['+91...', '+91...']
+    instead of one joined string. Excel/openpyxl cannot write a raw list
+    into a cell and crashes, so this joins any list into a plain string
+    (and stringifies any other unexpected type) before it ever reaches
+    the report-building step, no matter what the model returns.
+    """
+    for row in rows:
+        for key, value in list(row.items()):
+            if isinstance(value, list):
+                row[key] = ", ".join(str(v) for v in value if v is not None)
+            elif isinstance(value, dict):
+                row[key] = str(value)
+    return rows
+
+
 def extract_chunk(chunk_text: str, client: anthropic.Anthropic | None = None) -> tuple[list[dict], float]:
     """Extracts structured listings from one chunk. Returns (rows, real_cost_usd)
     -- the real cost of every call made for this chunk, including a retry
@@ -99,7 +118,7 @@ def extract_chunk(chunk_text: str, client: anthropic.Anthropic | None = None) ->
     raw = response.content[0].text
 
     try:
-        return json.loads(_clean_json_text(raw)), total_cost
+        return _sanitize_rows(json.loads(_clean_json_text(raw))), total_cost
     except json.JSONDecodeError:
         # One retry with an explicit correction nudge -- this re-sends the
         # full original context too, so it costs real money, tracked here.
@@ -114,7 +133,7 @@ def extract_chunk(chunk_text: str, client: anthropic.Anthropic | None = None) ->
             ],
         )
         total_cost += _real_cost(response)
-        return json.loads(_clean_json_text(response.content[0].text)), total_cost
+        return _sanitize_rows(json.loads(_clean_json_text(response.content[0].text))), total_cost
 
 
 def extract_all(chunks: list[str], max_cost_usd: float = None) -> tuple[list[dict], float, bool]:
