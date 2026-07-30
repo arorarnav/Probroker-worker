@@ -10,6 +10,7 @@ import os
 import json
 import time
 import anthropic
+from pipeline.cost_control import INPUT_PRICE_PER_TOKEN, OUTPUT_PRICE_PER_TOKEN
 
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
@@ -60,9 +61,21 @@ def _clean_json_text(raw: str) -> str:
     return raw
 
 
-def extract_chunk(chunk_text: str, client: anthropic.Anthropic | None = None) -> list[dict]:
-    """Extracts structured listings from one chunk of grouped chat text."""
+def _real_cost(response) -> float:
+    """Computes the ACTUAL cost of one API call from Anthropic's own
+    reported token usage -- not an estimate. This is the number that
+    genuinely matches what you get billed."""
+    usage = response.usage
+    return (usage.input_tokens * INPUT_PRICE_PER_TOKEN) + (usage.output_tokens * OUTPUT_PRICE_PER_TOKEN)
+
+
+def extract_chunk(chunk_text: str, client: anthropic.Anthropic | None = None) -> tuple[list[dict], float]:
+    """Extracts structured listings from one chunk. Returns (rows, real_cost_usd)
+    -- the real cost of every call made for this chunk, including a retry
+    if one was needed, since a retry re-sends the full context and genuinely
+    costs money too."""
     client = client or _get_client()
+    total_cost = 0.0
 
     response = client.messages.create(
         model=DEFAULT_MODEL,
@@ -70,13 +83,14 @@ def extract_chunk(chunk_text: str, client: anthropic.Anthropic | None = None) ->
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": chunk_text}],
     )
+    total_cost += _real_cost(response)
     raw = response.content[0].text
 
     try:
-        return json.loads(_clean_json_text(raw))
+        return json.loads(_clean_json_text(raw)), total_cost
     except json.JSONDecodeError:
-        # One retry with an explicit correction nudge -- cheap insurance
-        # against an occasional malformed response.
+        # One retry with an explicit correction nudge -- this re-sends the
+        # full original context too, so it costs real money, tracked here.
         response = client.messages.create(
             model=DEFAULT_MODEL,
             max_tokens=4096,
@@ -87,18 +101,40 @@ def extract_chunk(chunk_text: str, client: anthropic.Anthropic | None = None) ->
                 {"role": "user", "content": "That wasn't valid JSON. Return ONLY the JSON array, nothing else."},
             ],
         )
-        return json.loads(_clean_json_text(response.content[0].text))
+        total_cost += _real_cost(response)
+        return json.loads(_clean_json_text(response.content[0].text)), total_cost
 
 
-def extract_all(chunks: list[str]) -> list[dict]:
-    """Runs extraction across every chunk and flattens the results."""
+def extract_all(chunks: list[str], max_cost_usd: float = None) -> tuple[list[dict], float, bool]:
+    """
+    Runs extraction across chunks, tracking REAL cumulative cost from
+    Anthropic's own reported usage after every single call -- not a
+    one-time estimate made before any of this ran.
+
+    If max_cost_usd is given, this STOPS immediately (mid-run, not just
+    at the start) the instant real spend reaches that cap, regardless of
+    how many chunks are left -- this is the actual hard ceiling, enforced
+    against reality as it happens, not a guess made in advance.
+
+    Returns (rows, real_total_cost_usd, was_stopped_early).
+    """
     client = _get_client()
     all_rows = []
+    running_cost = 0.0
+    was_stopped_early = False
+
     for i, chunk in enumerate(chunks, 1):
+        if max_cost_usd is not None and running_cost >= max_cost_usd:
+            print(f"[budget] real spend (${running_cost:.3f}) hit the ${max_cost_usd:.2f} cap -- "
+                  f"stopping here, {len(chunks) - i + 1} chunk(s) not processed")
+            was_stopped_early = True
+            break
+
         for attempt in range(1, MAX_RETRIES_ON_RATE_LIMIT + 1):
             try:
-                rows = extract_chunk(chunk, client)
+                rows, cost = extract_chunk(chunk, client)
                 all_rows.extend(rows)
+                running_cost += cost
                 break
             except (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.APITimeoutError) as e:
                 # Rate limits AND transient connection/timeout blips both get
@@ -115,4 +151,7 @@ def extract_all(chunks: list[str]) -> list[dict]:
                 print(f"[warn] chunk {i}/{len(chunks)} failed: {e}")
                 break
         time.sleep(REQUEST_DELAY_SECONDS)
-    return all_rows
+
+    print(f"  real cost so far: ${running_cost:.3f}")
+    return all_rows, running_cost, was_stopped_early
+

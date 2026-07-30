@@ -81,16 +81,21 @@ def process_report(supabase, report: dict):
     print(f"  {len(chunks)} chunks before cost cap")
 
     cost_cap_usd = get_cost_cap_usd(months_back)
-    chunks, was_truncated, estimated_cost = cap_chunks_to_budget(chunks, cost_cap_usd)
-    if was_truncated:
-        print(f"  [budget cap] full window would exceed ${cost_cap_usd:.2f} (tier: {months_back}mo) -- "
+    chunks, was_truncated_upfront, estimated_cost = cap_chunks_to_budget(chunks, cost_cap_usd)
+    if was_truncated_upfront:
+        print(f"  [pre-check] full window would exceed ${cost_cap_usd:.2f} (tier: {months_back}mo) -- "
               f"kept the {len(chunks)} most recent chunks instead (est. ${estimated_cost:.2f})")
     else:
-        print(f"  within budget (${cost_cap_usd:.2f} cap for {months_back}mo tier) -- "
-              f"processing all {len(chunks)} chunks (est. ${estimated_cost:.2f})")
+        print(f"  within estimate (${cost_cap_usd:.2f} cap for {months_back}mo tier) -- "
+              f"attempting all {len(chunks)} chunks (est. ${estimated_cost:.2f})")
 
-    rows = extract_all(chunks)
-    print(f"  extracted {len(rows)} listings")
+    # The upfront estimate above decides which chunks to even attempt, but
+    # it's still just an estimate -- this is the REAL enforcement: stops
+    # the instant actual spend (from Anthropic's own reported usage) hits
+    # the cap, mid-run, regardless of what the estimate predicted.
+    rows, real_cost, was_stopped_early = extract_all(chunks, max_cost_usd=cost_cap_usd)
+    was_truncated = was_truncated_upfront or was_stopped_early
+    print(f"  extracted {len(rows)} listings (real cost: ${real_cost:.3f})")
 
     rows = fill_missing_demand_contact(rows)
 
@@ -123,6 +128,7 @@ def process_report(supabase, report: dict):
         "status": "completed",
         "report_path": output_path_in_bucket,
         "truncated_for_budget": was_truncated,
+        "real_cost_usd": round(real_cost, 4),
     }).eq("id", report_id).execute()
 
     print(f"  done -> {output_path_in_bucket}")
