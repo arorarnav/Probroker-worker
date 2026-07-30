@@ -27,6 +27,7 @@ from pipeline.extract import extract_all
 from pipeline.match import find_matches, fill_missing_demand_contact
 from pipeline.report import build_report
 from pipeline.cost_control import cap_chunks_to_budget, get_cost_cap_usd
+from pipeline.dedup import deduplicate_message_groups, attach_repost_info
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
@@ -77,6 +78,11 @@ def process_report(supabase, report: dict):
     grouped = parse_and_group(raw_text, since=since)
     print(f"  parsed {len(grouped)} message groups (last {months_back} months only)")
 
+    grouped, repost_clusters = deduplicate_message_groups(grouped)
+    reposts_found = sum(1 for c in repost_clusters if c["times_posted"] > 1)
+    if reposts_found:
+        print(f"  deduplicated {reposts_found} repost cluster(s) -- skipped resending those to the API")
+
     chunks = chunk_for_extraction(grouped)
     print(f"  {len(chunks)} chunks before cost cap")
 
@@ -97,6 +103,7 @@ def process_report(supabase, report: dict):
     was_truncated = was_truncated_upfront or was_stopped_early
     print(f"  extracted {len(rows)} listings (real cost: ${real_cost:.3f})")
 
+    rows = attach_repost_info(rows, repost_clusters)
     rows = fill_missing_demand_contact(rows)
 
     # Safety check: if extraction produced nothing at all, something is

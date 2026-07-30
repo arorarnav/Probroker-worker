@@ -32,37 +32,38 @@ def build_report(rows: list[dict], matches: list[dict], out_path: str,
     # ---------- Sheet 1: Listings ----------
     ws = wb.active
     ws.title = "Listings"
-    headers = ["Date Posted", "Posted By", "Type", "Location", "Size", "Price",
+    headers = ["Date Posted", "Times Posted", "Posted By", "Type", "Location", "Size", "Price",
                "Contact", "Notes", "Days Since Posted", "Status"]
     _style_header_row(ws, headers, HEADER_FILL)
 
-    ws["L1"] = "Active if age <="
-    ws["M1"] = active_days
-    ws["L2"] = "Aging if age <="
-    ws["M2"] = aging_days
+    ws["M1"] = "Active if age <="
+    ws["N1"] = active_days
+    ws["M2"] = "Aging if age <="
+    ws["N2"] = aging_days
 
     for i, r in enumerate(rows, start=2):
         ws.cell(row=i, column=1, value=r.get("date")).font = FONT_NORMAL
-        ws.cell(row=i, column=2, value=r.get("poster")).font = FONT_NORMAL
-        ws.cell(row=i, column=3, value=r.get("listing_type")).font = FONT_NORMAL
-        ws.cell(row=i, column=4, value=r.get("location")).font = FONT_NORMAL
-        ws.cell(row=i, column=5, value=r.get("size")).font = FONT_NORMAL
-        ws.cell(row=i, column=6, value=r.get("price")).font = FONT_NORMAL
-        ws.cell(row=i, column=7, value=r.get("contact")).font = FONT_NORMAL
-        ws.cell(row=i, column=8, value=r.get("notes")).font = FONT_NORMAL
-        ws.cell(row=i, column=9, value=f"=TODAY()-DATEVALUE(A{i})").font = FONT_NORMAL
-        ws.cell(row=i, column=10, value=(
-            f'=IF(I{i}<=$M$1,"Active",IF(I{i}<=$M$2,"Aging","Stale"))'
+        ws.cell(row=i, column=2, value=r.get("times_posted", 1)).font = FONT_NORMAL
+        ws.cell(row=i, column=3, value=r.get("poster")).font = FONT_NORMAL
+        ws.cell(row=i, column=4, value=r.get("listing_type")).font = FONT_NORMAL
+        ws.cell(row=i, column=5, value=r.get("location")).font = FONT_NORMAL
+        ws.cell(row=i, column=6, value=r.get("size")).font = FONT_NORMAL
+        ws.cell(row=i, column=7, value=r.get("price")).font = FONT_NORMAL
+        ws.cell(row=i, column=8, value=r.get("contact")).font = FONT_NORMAL
+        ws.cell(row=i, column=9, value=r.get("notes")).font = FONT_NORMAL
+        ws.cell(row=i, column=10, value=f"=TODAY()-DATEVALUE(A{i})").font = FONT_NORMAL
+        ws.cell(row=i, column=11, value=(
+            f'=IF(J{i}<=$N$1,"Active",IF(J{i}<=$N$2,"Aging","Stale"))'
         )).font = FONT_NORMAL
-        for col in range(1, 11):
+        for col in range(1, 12):
             ws.cell(row=i, column=col).border = BORDER
 
     last_row = len(rows) + 1
-    widths = {1: 12, 2: 22, 3: 10, 4: 34, 5: 20, 6: 20, 7: 18, 8: 34, 9: 10, 10: 10}
+    widths = {1: 12, 2: 12, 3: 22, 4: 10, 5: 34, 6: 20, 7: 20, 8: 18, 9: 34, 10: 10, 11: 10}
     for col, w in widths.items():
         ws.column_dimensions[get_column_letter(col)].width = w
     ws.freeze_panes = "A2"
-    ws.add_table(Table(displayName="Listings", ref=f"A1:J{last_row}",
+    ws.add_table(Table(displayName="Listings", ref=f"A1:K{last_row}",
                         tableStyleInfo=TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)))
     for i in range(2, last_row + 1):
         ws.cell(row=i, column=1).number_format = "yyyy-mm-dd"

@@ -63,10 +63,20 @@ def _clean_json_text(raw: str) -> str:
 
 def _real_cost(response) -> float:
     """Computes the ACTUAL cost of one API call from Anthropic's own
-    reported token usage -- not an estimate. This is the number that
-    genuinely matches what you get billed."""
+    reported token usage -- not an estimate. Accounts for prompt caching:
+    a cache write costs MORE than normal input (1.25x), a cache read
+    costs far LESS (0.1x) -- using plain input pricing for cached tokens
+    would misreport the real cost once caching is active."""
     usage = response.usage
-    return (usage.input_tokens * INPUT_PRICE_PER_TOKEN) + (usage.output_tokens * OUTPUT_PRICE_PER_TOKEN)
+    regular_input = getattr(usage, "input_tokens", 0)
+    cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+
+    cost = regular_input * INPUT_PRICE_PER_TOKEN
+    cost += cache_write * INPUT_PRICE_PER_TOKEN * 1.25
+    cost += cache_read * INPUT_PRICE_PER_TOKEN * 0.1
+    cost += usage.output_tokens * OUTPUT_PRICE_PER_TOKEN
+    return cost
 
 
 def extract_chunk(chunk_text: str, client: anthropic.Anthropic | None = None) -> tuple[list[dict], float]:
@@ -79,8 +89,10 @@ def extract_chunk(chunk_text: str, client: anthropic.Anthropic | None = None) ->
 
     response = client.messages.create(
         model=DEFAULT_MODEL,
-        max_tokens=4096,
-        system=SYSTEM_PROMPT,
+        max_tokens=8192,  # raised from 4096 -- real usage data showed AVERAGE
+                          # output per chunk on a dense chat already exceeded
+                          # the old ceiling, silently truncating listings
+        system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": chunk_text}],
     )
     total_cost += _real_cost(response)
@@ -93,8 +105,8 @@ def extract_chunk(chunk_text: str, client: anthropic.Anthropic | None = None) ->
         # full original context too, so it costs real money, tracked here.
         response = client.messages.create(
             model=DEFAULT_MODEL,
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
+            max_tokens=8192,
+            system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             messages=[
                 {"role": "user", "content": chunk_text},
                 {"role": "assistant", "content": raw},
