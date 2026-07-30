@@ -25,7 +25,8 @@ one JSON object with these exact fields:
 
 - date: the message date, format YYYY-MM-DD
 - poster: sender name as given
-- listing_type: one of "supply", "demand", "rental", "other"
+- listing_type: one of "demand" (wants/looking for), "supply" (has/offering), or "other" (genuinely unclear direction, e.g. a general land inquiry) -- this is ONLY about direction, never about deal type
+- category: one of "sale", "rental", or "other" (genuinely unclear deal type, e.g. a joint-development or builder agreement post) -- this is ONLY about deal type. A "wanted for rent" post is listing_type="demand", category="rental". A "for rent" post is listing_type="supply", category="rental". A "wanted to buy" post is listing_type="demand", category="sale".
 - location: locality/area, cleaned up but not invented
 - size: area/size as stated (keep original units -- bigha, sq ft, sq yd, etc.)
 - price: price/rate as stated, or null if not mentioned

@@ -102,15 +102,21 @@ def _recency_score(d: str) -> float:
 
 def find_matches(rows: list[dict], location_threshold: float = 0.5, top_n: int = 200) -> list[dict]:
     """
-    Compares every demand row against every supply row and returns ranked
-    matches above a minimum location-similarity bar.
+    Compares every demand row against every supply row IN THE SAME CATEGORY
+    (sale-with-sale, rental-with-rental -- never crossing the two) and
+    returns ranked matches above a minimum location-similarity bar.
+
+    Rows with category "other" (genuinely unclear deal type) are excluded
+    from matching entirely -- there's no safe category to pair them within.
     """
-    demands = [r for r in rows if r.get("listing_type") == "demand"]
-    supplies = [r for r in rows if r.get("listing_type") == "supply"]
+    demands = [r for r in rows if r.get("listing_type") == "demand" and r.get("category", "sale") in ("sale", "rental")]
+    supplies = [r for r in rows if r.get("listing_type") == "supply" and r.get("category", "sale") in ("sale", "rental")]
 
     matches = []
     for d in demands:
         for s in supplies:
+            if d.get("category", "sale") != s.get("category", "sale"):
+                continue  # never match a rental-seeker with a sale listing, or vice versa
             if d.get("poster") and d.get("poster") == s.get("poster"):
                 continue  # a broker's own demand doesn't need matching to their own supply
             loc_sim = _location_similarity(d.get("location", ""), s.get("location", ""))
